@@ -2,6 +2,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from database.schema import TafsiriConfigSchema
 from bson.objectid import ObjectId
 from database.database import get_mongo_collection, CONFIGS_COLLECTION
+from urllib.parse import quote_plus
+from pydantic import BaseModel, Field
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 
 router = APIRouter()
 
@@ -103,3 +107,37 @@ async def delete_config(config_id):
     if result.deleted_count == 1:
         return {"message": "Config deleted successfully"}
     raise HTTPException(status_code=404, detail="Config not found")
+
+
+class DBConnectionRequest(BaseModel):
+    db_type: str = Field(...,
+                         description="Type of the database (e.g., 'mysql', 'postgresql')")
+    host_port: str = Field(..., description="Database host & port")
+    database: str = Field(..., description="Database name")
+    username: str = Field(..., description="Database username")
+    password: str = Field(..., description="Database password")
+
+
+@router.post("/test_db_connection")
+async def test_db_connection(data: DBConnectionRequest):
+    # Encode special characters in the password
+    encoded_password = quote_plus(data.password)
+    db_url = f"{data.db_type}://{data.username}:{encoded_password}@{data.host_port}/{data.database}"
+
+    success, error_message = test_db(db_url)
+    if success:
+        return {"status": "Database connection successful"}
+    else:
+        raise HTTPException(status_code=500, detail=error_message)
+
+
+def test_db(db_url):
+    try:
+        engine = create_engine(db_url)
+        conn = engine.connect()
+        conn.close()
+        return True, None
+    except OperationalError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
