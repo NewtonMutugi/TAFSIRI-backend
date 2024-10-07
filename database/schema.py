@@ -30,6 +30,8 @@ class TafsiriConfigSchema(BaseModel):
     example_prompt: Optional[str] = None
     om_host: Optional[str] = None
     om_jwt: Optional[str] = None
+    created_at: datetime = datetime.now()
+    updated_at: datetime = datetime.now()
 
     class Config:
         extra = 'allow'
