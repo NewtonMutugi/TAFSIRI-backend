@@ -1,3 +1,4 @@
+import csv
 import functools
 import os
 import requests
@@ -46,61 +47,47 @@ CACHE_TIMEOUT = 3600  # 1 hour
 
 
 def get_dictionary_info():
-    # JWT and host for fetching table descriptions
-    jwt_token = settings.OM_JWT
-    om_host = settings.OM_HOST
+    csv_path = 'dictionary/text2sql.csv'
 
-    # Fetch table descriptions and metadata
+    table_descriptions = {}
+
+    with open(csv_path, mode='r') as file:
+        reader = csv.DictReader(file)
+
+        for row in reader:
+            parent_value = row['parent'].replace('text2sql.', '') if row['parent'] else None
+            if parent_value in tables or row['name'] in tables:
+                if not parent_value:
+                    table_name = row['name']
+                    table_description = row['description']
+                    table_descriptions[table_name] = {
+                        'description': table_description,
+                        'columns': {}
+                    }
+                else:
+                    table_name, column_name = parent_value, row['name']
+                    column_description = row['description']
+
+                    if table_name in table_descriptions:
+                        table_descriptions[table_name]['columns'][column_name] = column_description
+
     tables_info = []
-    for table_name in tables:
-        table_description = ""
-        columns_info = {}
-        table_glossary_uri = f"{om_host}/api/v1/glossaryTerms/name/text2sql.{table_name}"
-        try:
-            response = requests.get(table_glossary_uri, headers={
-                                    "Authorization": f"Bearer {jwt_token}"}, verify=False)
-            response.raise_for_status()
+    for table_name, data in table_descriptions.items():
+        table_description = data['description']
+        columns_info_list = [
+            f'"{col_name}": {col_desc}' for col_name, col_desc in data['columns'].items()
+        ]
+        columns_info = ". ".join(columns_info_list)
 
-            if response.status_code // 100 == 2:
-                glossary_term = response.json()
-                table_description = glossary_term.get("description")
-                if table_description is not None:
-                    # Get column descriptions dynamically from the MSSQL table
-                    table = Table(table_name, metadata, autoload=True)
-                    columns = table.columns.keys()
-                    columns_info_list = []
-                    for column_name in columns:
-                        column_glossary_uri = f"{om_host}/api/v1/glossaryTerms/name/text2sql.{table_name}.{column_name}"
-                        try:
-                            response = requests.get(column_glossary_uri,
-                                                    headers={"Authorization": f"Bearer {jwt_token}"})
-                            response.raise_for_status()
-
-                            if response.status_code // 100 == 2:
-                                column_info = response.json()
-                                column_desc = f"\"{column_name}\": {column_info.get('description')}"
-                                columns_info_list.append(column_desc)
-                        except requests.exceptions.HTTPError as he:
-                            if he.response.status_code // 100 == 4:
-                                print(
-                                    f"Glossary term not found for URI: {column_glossary_uri}")
-                            else:
-                                print(
-                                    f"Failed to retrieve column description for {column_name} with message {he.response.text}",
-                                    he)
-                    columns_info = ". ".join(columns_info_list)
-        except requests.exceptions.HTTPError as he:
-            if he.response.status_code // 100 == 4:
-                print(f"Glossary term not found for URI: {table_glossary_uri}")
-            else:
-                print(
-                    f"Failed to retrieve table description for {table_name} with message {he.response.text}", he)
-
-        tables_info.append(SQLTableSchema(
-            table_name=table_name,
-            context_str=(f'description of the table: {table_description}. These are columns in the table and their descriptions: {columns_info}')
-        ))
-
+        tables_info.append(
+            SQLTableSchema(
+                table_name=table_name,
+                context_str=(
+                    f'description of the table: {table_description}. '
+                    f'These are columns in the table and their descriptions: {columns_info}'
+                )
+            )
+        )
     return tables_info
 
 
